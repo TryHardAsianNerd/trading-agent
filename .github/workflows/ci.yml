@@ -1,15 +1,18 @@
-# Machine checks on every PR (D-059): lint, the full test suite against the same
+# Machine checks on every push to main and every PR (D-059): lint, the full test suite against the same
 # Postgres and Redis as docker-compose.yml, and the PR code-size limit. No secrets:
 # tests needing provider keys stub them.
 name: CI
 
-on: pull_request
+on:
+  push:
+    branches: [main]
+  pull_request:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.event.pull_request.number }}
+  group: ci-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -61,4 +64,5 @@ jobs:
       - name: Tests
         run: python -m pytest -rs
       - name: PR size
+        if: github.event_name == 'pull_request'
         run: python scripts/pr_size.py origin/${{ github.base_ref }}

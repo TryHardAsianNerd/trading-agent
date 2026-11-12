@@ -679,3 +679,16 @@ D-044 sweep study (25% trail):
 **Consequences:**
 - The work the spec requires before live is queued: U3, U4 and the weekly report's swing-bar and VOO views (F8).
 - Jason confirmed on 2026-10-18 that a window with no swing trades is extended by two weeks (L3), and that the 2-weekly live review checks the last 4 weeks against the +5% bar (L6).
+
+## D-071 - Cost basis counts from the ledger start, and the broker referees the app's positions (Jason, 2026-11-09)
+
+**Decision (Jason, 2026-11-09):** "go with A, two in a row, you run write".
+- **The rule:** a symbol's cost basis uses only its fills from the paper ledger's start on, as the ledger already says it does. `TradeRepository.fills_for_symbol` takes `since`, and the executor's realized P&L, the tracker's fallback entry and its trailing-stop entry time pass the ledger start (`CashFlowRepository.start`). Without a ledger nothing changes. The core's trail already worked this way.
+- **The referee:** each cycle, after the book is reconciled, the tracker compares the app's open quantity per symbol (its fills since the ledger start) with the broker's. A difference over 0.000001 units that lasts two cycles in a row logs `position_mismatch` at error level, which pages Discord. It pages once per symbol until the quantities match again (`position_mismatch_cleared`). It is read-only, is skipped while a venue's book failed to reconcile, and a failure inside it is logged as a warning. The warning `cost_basis_quantity_mismatch`, which covered part of this on one path, is deleted.
+- **The correction:** `python -m trading_agent.portfolio.repair_pnl` recomputes realized P&L for every paper closing fill since the ledger start. It lists the changes as a dry run, and `--write` writes them, logging each old value first so the write can be undone.
+
+**Why:** the 2026-10-02 cutover sold AAPL 32, MSFT 21, NVDA 24, SPY 14 and XOM 68 without booking the sales (by design, `ledger.close_positions`). The cost-basis walk read every fill ever booked, so those lots still looked open and blended into later buys. AAPL's 2026-11-04 swing sale was booked at +2.28; its own result was -1.19. Option B (book the cutover sales as trades) was rejected: the next cutover would repeat the bug.
+
+**Consequences:**
+- Realized P&L feeds the consecutive-losses breaker as well as the weekly report and SPEC L2. Correcting AAPL turns a counted win into a loss: the swing sleeve's streak goes from 0 to 1, far below the 5-loss pause. This changes what the practice run's gate saw, but no rule changed.
+- The fix and the referee need an agent restart (Jason's step), off-hours before 2026-12-04, together with the 2027 macro calendar. Until then the running agent books sales the old way (MSFT's 21 cutover shares still blend into its swing lot), so `repair_pnl` runs again after the restart, dry run then `--write`; a rerun corrects only rows still booked under the old rule.
