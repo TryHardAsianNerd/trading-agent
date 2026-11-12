@@ -1,0 +1,14 @@
+# Secrets never enter the image: the worker gets them at runtime via env_file.
+.env
+.env.*
+.git
+.venv
+venv
+models
+logs
+tests
+docs
+**/__pycache__
+.pytest_cache
+.ruff_cache
+.claude

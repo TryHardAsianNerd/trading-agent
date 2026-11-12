@@ -1,0 +1,64 @@
+# Compose project name: containers, network, volumes and the worker image are grouped under it.
+name: trading-agent
+
+services:
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    container_name: trading-agent-db
+    environment:
+      POSTGRES_USER: trading
+      POSTGRES_PASSWORD: trading_dev_only
+      POSTGRES_DB: trading_agent
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - timescale_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U trading -d trading_agent"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: trading-agent-redis
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redis_data:/data
+    command: ["redis-server", "--appendonly", "yes"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Background jobs (D-025): weekly model retrain, FinBERT news scoring (D-026). Keys come from .env at runtime,
+  # never baked into the image. Rebuild after code changes: docker compose up -d --build worker
+  worker:
+    build: .
+    container_name: trading-agent-worker
+    env_file:
+      # Optional so infra-only `docker compose up` still works without a .env.
+      - path: .env
+        required: false
+    environment:
+      CELERY_BROKER_URL: redis://redis:6379/1
+      # Container hostname; overrides .env. Keep the password in step with timescaledb above.
+      DATABASE_URL: postgresql+psycopg://trading:trading_dev_only@timescaledb:5432/trading_agent
+      HF_HUB_DISABLE_TELEMETRY: "1"
+    volumes:
+      - ./models:/app/models
+      # FinBERT weights (~440 MB), downloaded once on the first news-scoring run.
+      - hf_cache:/home/worker/.cache/huggingface
+    depends_on:
+      redis:
+        condition: service_healthy
+      timescaledb:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  timescale_data:
+  redis_data:
+  hf_cache:
